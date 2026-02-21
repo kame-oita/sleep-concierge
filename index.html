@@ -962,9 +962,11 @@ Gemini API:
           contents: [{ parts: [{ text: prompt }] }],
           // 生成設定: JSON形式の出力を安定させるためのパラメータ
           generationConfig: {
-            temperature: 0.7,                        // 創造性と安定性のバランス
-            maxOutputTokens: 8192,                   // 増量: 2048では複雑なJSONが途中で切れる
-            responseMimeType: 'application/json',    // JSON専用モード: マークダウン不要・確実にJSON返却
+            temperature: 0.7,    // 創造性と安定性のバランス
+            maxOutputTokens: 8192, // 増量: 2048では複雑なJSONが途中で切れる
+            // ※ responseMimeType:'application/json' は安全フィルター作動時に
+            //   空レスポンスや {} だけを返す問題があるため使用しない。
+            //   プロンプト側でJSON出力を指示する方式で対応する。
           }
         }),
       });
@@ -993,24 +995,38 @@ Gemini API:
       }
 
       // レスポンスから生成テキストと終了理由を取り出す
-      const data = await response.json();
-      const candidate   = data?.candidates?.[0];
-      const text        = candidate?.content?.parts?.[0]?.text;
+      const data         = await response.json();
+      const candidate    = data?.candidates?.[0];
+      const text         = candidate?.content?.parts?.[0]?.text;
       const finishReason = candidate?.finishReason;
 
-      // MAX_TOKENS: トークン上限で打ち切られた → JSONが不完全になる主因のひとつ
-      if (finishReason === 'MAX_TOKENS') {
-        console.warn('Gemini: MAX_TOKENS で応答が打ち切られました。生レスポンス:', data);
-        throw new Error(
-          'AIの応答がトークン上限で途中終了しました。\n\n' +
-          'もう一度「AIアドバイスを生成」を押してください。\n' +
-          '（繰り返す場合は入力内容を短くすると改善する場合があります）'
-        );
+      // デバッグ: 終了理由と受信テキスト冒頭をコンソールに出力
+      console.log('Gemini finishReason:', finishReason);
+      console.log('Gemini text (先頭300字):', (text || '').slice(0, 300));
+
+      // STOP 以外の終了理由はすべて問題ありとして個別にエラーを出す
+      const finishReasonMessages = {
+        MAX_TOKENS  : 'トークン上限に達したため応答が途中で切れました。もう一度お試しください。',
+        SAFETY      : '安全フィルターにより応答がブロックされました。入力内容を変更してもう一度お試しください。',
+        RECITATION  : '著作権フィルターにより応答が中断されました。もう一度お試しください。',
+        OTHER       : '不明な理由で応答が中断されました。もう一度お試しください。',
+        BLOCKLIST   : '禁止ワードフィルターにより応答がブロックされました。',
+        PROHIBITED_CONTENT: '禁止コンテンツとして応答がブロックされました。',
+        SPII        : 'センシティブ情報フィルターにより応答がブロックされました。',
+      };
+      if (finishReason && finishReason !== 'STOP') {
+        const msg = finishReasonMessages[finishReason]
+          || `応答が異常終了しました (finishReason: ${finishReason})。もう一度お試しください。`;
+        console.warn('Gemini 異常終了:', finishReason, data);
+        throw new Error(msg);
       }
 
       if (!text) {
-        console.warn('Gemini: テキストが取得できません。レスポンス:', data);
-        throw new Error('Gemini API から有効なテキストが返されませんでした');
+        console.warn('Gemini: テキストが空です。レスポンス全体:', JSON.stringify(data));
+        throw new Error(
+          'Gemini API から有効なテキストが返されませんでした。\n' +
+          'ブラウザの開発者ツール（F12）のコンソールで詳細を確認できます。'
+        );
       }
 
       return text;
@@ -1217,15 +1233,18 @@ Gemini API:
         // 文字列内の制御文字だけを安全にエスケープする。
         jsonText = sanitizeJsonControlChars(jsonText);
 
-        // JSON 文字列を JavaScript オブジェクトに変換（失敗時は生テキストをコンソール出力）
+        // JSON 文字列を JavaScript オブジェクトに変換
+        // 失敗時は生テキストの冒頭200字を画面に表示してデバッグしやすくする
         let advice;
         try {
           advice = JSON.parse(jsonText);
         } catch (parseErr) {
+          const preview = rawText ? rawText.slice(0, 200) : '(空のレスポンス)';
           console.error('JSON パース失敗。Gemini の生レスポンス:', rawText);
           throw new Error(
             `AIの返答をJSON形式で解析できませんでした。\n` +
-            `(${parseErr.message})\n\n` +
+            `エラー: ${parseErr.message}\n\n` +
+            `【受信データ冒頭】\n${preview}\n\n` +
             `もう一度「AIアドバイスを生成」を押してください。`
           );
         }
