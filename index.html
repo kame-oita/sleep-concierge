@@ -790,6 +790,62 @@ Gemini API:
 
 
     // ============================================================
+    // JSON修復（途中で切れたJSONを自動補完する）
+    // ============================================================
+
+    /**
+     * Gemini の応答が途中で切れてJSONが不完全な場合に自動補完する。
+     *
+     * 仕組み:
+     *   1文字ずつ走査して開いている文字列・配列・オブジェクトを追跡し、
+     *   テキスト末尾で閉じられていないものを補完して valid JSON に近づける。
+     *
+     * 例:
+     *   入力: '{"greeting":"おはよう","today_summary":"今日は'
+     *   補完: '{"greeting":"おはよう","today_summary":"今日は"}'
+     *
+     * @param {string} text - 途中で切れている可能性がある JSON テキスト
+     * @returns {string}    - 補完後の JSON テキスト（パースできない場合もある）
+     */
+    function repairTruncatedJson(text) {
+      let inString = false;
+      let escaped  = false;
+      const stack  = []; // 開いている { または [ をスタックで管理
+
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+
+        if (escaped)          { escaped = false; continue; }
+        if (c === '\\' && inString) { escaped = true;  continue; }
+
+        if (c === '"') {
+          inString = !inString;
+          continue;
+        }
+
+        if (!inString) {
+          if      (c === '{') stack.push('}');
+          else if (c === '[') stack.push(']');
+          else if (c === '}' || c === ']') stack.pop();
+        }
+      }
+
+      let repaired = text;
+
+      // 文字列の途中で終わっていたら閉じる
+      if (inString) repaired += '"';
+
+      // 末尾のカンマを除去（不完全な要素が途中で切れた場合）
+      repaired = repaired.replace(/,\s*$/, '');
+
+      // 開いたままの配列・オブジェクトを逆順で閉じる
+      while (stack.length > 0) repaired += stack.pop();
+
+      return repaired;
+    }
+
+
+    // ============================================================
     // Gemini APIキー管理
     // ============================================================
 
@@ -1234,27 +1290,39 @@ Gemini API:
         const jsonStart = jsonText.search(/[{[]/);
         if (jsonStart > 0) jsonText = jsonText.slice(jsonStart);
 
-        // ── JSONサニタイズ ──
-        // Gemini が JSON 文字列内に生の改行(\n)・復帰(\r)・タブ(\t)を
-        // エスケープなしで埋め込むと "Unterminated string" エラーになる。
-        // 1文字ずつ走査してJSON文字列の内外を判定し、
-        // 文字列内の制御文字だけを安全にエスケープする。
+        // ── Step1: JSONサニタイズ ──
+        // 文字列内の生の制御文字（\n \r \t）をエスケープ表現に変換
         jsonText = sanitizeJsonControlChars(jsonText);
 
-        // JSON 文字列を JavaScript オブジェクトに変換
-        // 失敗時は生テキストの冒頭200字を画面に表示してデバッグしやすくする
+        // ── Step2: JSON パース（失敗時は自動修復して再試行）──
         let advice;
         try {
+          // まずそのままパースを試みる
           advice = JSON.parse(jsonText);
-        } catch (parseErr) {
-          const preview = rawText ? rawText.slice(0, 200) : '(空のレスポンス)';
-          console.error('JSON パース失敗。Gemini の生レスポンス:', rawText);
-          throw new Error(
-            `AIの返答をJSON形式で解析できませんでした。\n` +
-            `エラー: ${parseErr.message}\n\n` +
-            `【受信データ冒頭】\n${preview}\n\n` +
-            `もう一度「AIアドバイスを生成」を押してください。`
-          );
+        } catch (firstErr) {
+          console.warn('JSON 初回パース失敗:', firstErr.message);
+          console.warn('修復を試みます。元テキスト:', jsonText);
+
+          // 失敗したら途中で切れたJSONを自動補完して再パース
+          try {
+            const repaired = repairTruncatedJson(jsonText);
+            console.log('修復後テキスト:', repaired);
+            advice = JSON.parse(repaired);
+            console.log('修復パース成功 ✅');
+            // 修復成功でも一部フィールドが欠けている可能性があるため
+            // displayAdvice 側で undefined を許容するよう実装済み
+          } catch (repairErr) {
+            // 修復してもパース不能な場合のみエラー表示
+            const preview = rawText ? rawText.slice(0, 300) : '(空のレスポンス)';
+            console.error('JSON 修復パースも失敗:', repairErr.message);
+            console.error('Gemini 生レスポンス全体:', rawText);
+            throw new Error(
+              `AIの返答をJSON形式で解析できませんでした。\n` +
+              `エラー: ${firstErr.message}\n\n` +
+              `【受信データ冒頭】\n${preview}\n\n` +
+              `もう一度「AIアドバイスを生成」を押してください。`
+            );
+          }
         }
 
         // パースに成功したらアドバイスを画面に表示
