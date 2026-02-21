@@ -40,7 +40,7 @@
 
 Gemini API:
   - ブラウザから REST API を直接呼び出す
-  - モデル: gemini-2.0-flash (高速・安定)
+  - モデル: gemini-2.5-flash (高速・安定・2.0-flash後継)
 ========================================================
 -->
 <html lang="ja">
@@ -724,9 +724,10 @@ Gemini API:
 
     /**
      * 使用するモデル名。
-     * gemini-2.0-flash: 高速・高品質・安定版
+     * gemini-2.5-flash: 2025年以降の推奨モデル（gemini-2.0-flash の後継）
+     * gemini-2.0-flash は新規ユーザー向けに提供終了のため 2.5-flash を使用。
      */
-    const GEMINI_MODEL = 'gemini-2.0-flash';
+    const GEMINI_MODEL = 'gemini-2.5-flash';
 
     // ※ GEMINI_API_URL は callGeminiAPI 内で動的に生成する。
     //   (APIキーが保存後に即反映されるよう、毎回 GEMINI_API_KEY を参照して構築する)
