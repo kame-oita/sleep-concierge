@@ -906,8 +906,9 @@ Gemini API:
           contents: [{ parts: [{ text: prompt }] }],
           // 生成設定: JSON形式の出力を安定させるためのパラメータ
           generationConfig: {
-            temperature: 0.7,      // 創造性と安定性のバランス
-            maxOutputTokens: 2048, // 最大出力トークン数
+            temperature: 0.7,                        // 創造性と安定性のバランス
+            maxOutputTokens: 8192,                   // 増量: 2048では複雑なJSONが途中で切れる
+            responseMimeType: 'application/json',    // JSON専用モード: マークダウン不要・確実にJSON返却
           }
         }),
       });
@@ -1131,13 +1132,27 @@ Gemini API:
         const rawText = await callGeminiAPI(prompt);
 
         // ── JSON 解析 ──
-        // Gemini がコードブロック (```json ... ```) で囲む場合があるため除去
+        // responseMimeType:'application/json' 指定時はコードブロック不要だが念のため除去。
+        // Gemini が稀に ```json ... ``` で囲んで返す場合も対応する。
         let jsonText = rawText.trim();
-        jsonText = jsonText.replace(/^```(?:json)?\s*\n?/i, '');
-        jsonText = jsonText.replace(/\n?```\s*$/i, '');
+        // コードブロック除去（先頭・末尾）
+        jsonText = jsonText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+        // 先頭の { または [ 以前の余分なテキストがあれば除去
+        const jsonStart = jsonText.search(/[{[]/);
+        if (jsonStart > 0) jsonText = jsonText.slice(jsonStart);
 
-        // JSON 文字列を JavaScript オブジェクトに変換
-        const advice = JSON.parse(jsonText);
+        // JSON 文字列を JavaScript オブジェクトに変換（失敗時は生テキストをコンソール出力）
+        let advice;
+        try {
+          advice = JSON.parse(jsonText);
+        } catch (parseErr) {
+          console.error('JSON パース失敗。Gemini の生レスポンス:', rawText);
+          throw new Error(
+            `AIの返答をJSON形式で解析できませんでした。\n` +
+            `(${parseErr.message})\n\n` +
+            `もう一度「AIアドバイスを生成」を押してください。`
+          );
+        }
 
         // パースに成功したらアドバイスを画面に表示
         displayAdvice(advice);
