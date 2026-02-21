@@ -486,8 +486,32 @@ Gemini API:
 
         <!-- 生年月日 (年齢計算でアドバイスの精度を上げる) -->
         <div class="form-group">
-          <label for="birthdate">生年月日<span class="required">*</span></label>
-          <input type="date" id="birthdate" required>
+          <label>生年月日<span class="required">*</span></label>
+          <div style="display:flex; gap:8px;">
+            <select id="birthdate-year" required onchange="updateBirthdateDays()"
+                    style="flex:3;">
+              <option value="">年</option>
+            </select>
+            <select id="birthdate-month" required onchange="updateBirthdateDays()"
+                    style="flex:2;">
+              <option value="">月</option>
+              <option value="01">1月</option>
+              <option value="02">2月</option>
+              <option value="03">3月</option>
+              <option value="04">4月</option>
+              <option value="05">5月</option>
+              <option value="06">6月</option>
+              <option value="07">7月</option>
+              <option value="08">8月</option>
+              <option value="09">9月</option>
+              <option value="10">10月</option>
+              <option value="11">11月</option>
+              <option value="12">12月</option>
+            </select>
+            <select id="birthdate-day" required style="flex:2;">
+              <option value="">日</option>
+            </select>
+          </div>
         </div>
 
         <!-- 性別 -->
@@ -961,6 +985,85 @@ Gemini API:
 
 
     // ============================================================
+    // 生年月日セレクト初期化・操作
+    // ============================================================
+
+    /**
+     * 生年月日「年」セレクトにオプションを動的生成する。
+     * 現在年から 1930 年まで降順で追加する。
+     */
+    function initBirthdateSelects() {
+      const yearSelect  = document.getElementById('birthdate-year');
+      const currentYear = new Date().getFullYear();
+      for (let y = currentYear; y >= 1930; y--) {
+        const opt = document.createElement('option');
+        opt.value       = String(y);
+        opt.textContent = `${y}年`;
+        yearSelect.appendChild(opt);
+      }
+      updateBirthdateDays();
+    }
+
+    /**
+     * 選択された年・月に応じて「日」セレクトのオプションを更新する。
+     * うるう年の2月（29日）も正確に算出する。
+     */
+    function updateBirthdateDays() {
+      const yearVal   = document.getElementById('birthdate-year').value;
+      const monthVal  = document.getElementById('birthdate-month').value;
+      const daySelect = document.getElementById('birthdate-day');
+      const prevDay   = daySelect.value; // 変更前に選択されていた日を保持
+
+      const year  = parseInt(yearVal)  || 2000;
+      const month = parseInt(monthVal) || 1;
+      // new Date(year, month, 0) は指定月の最終日を返す
+      const daysInMonth = new Date(year, month, 0).getDate();
+
+      daySelect.innerHTML = '<option value="">日</option>';
+      for (let d = 1; d <= daysInMonth; d++) {
+        const opt = document.createElement('option');
+        opt.value       = String(d).padStart(2, '0');
+        opt.textContent = `${d}日`;
+        daySelect.appendChild(opt);
+      }
+
+      // 以前の選択日が有効範囲内なら復元する
+      if (prevDay && parseInt(prevDay) <= daysInMonth) {
+        daySelect.value = prevDay;
+      }
+    }
+
+    /**
+     * 年・月・日セレクトから "YYYY-MM-DD" 形式の文字列を返す。
+     * いずれか未選択の場合は空文字を返す。
+     *
+     * @returns {string}
+     */
+    function getBirthdateValue() {
+      const year  = document.getElementById('birthdate-year').value;
+      const month = document.getElementById('birthdate-month').value;
+      const day   = document.getElementById('birthdate-day').value;
+      return (year && month && day) ? `${year}-${month}-${day}` : '';
+    }
+
+    /**
+     * "YYYY-MM-DD" 形式の文字列を年・月・日セレクトに復元する。
+     * ページ読み込み時に localStorage の値を戻す際に使用する。
+     *
+     * @param {string} dateStr - "YYYY-MM-DD" 形式の日付文字列
+     */
+    function setBirthdateValue(dateStr) {
+      if (!dateStr) return;
+      const parts = dateStr.split('-');
+      if (parts.length !== 3) return;
+      document.getElementById('birthdate-year').value  = parts[0];
+      document.getElementById('birthdate-month').value = parts[1];
+      updateBirthdateDays(); // 日オプションを月に合わせて更新してから日をセット
+      document.getElementById('birthdate-day').value   = parts[2];
+    }
+
+
+    // ============================================================
     // 基本情報チェック
     // ============================================================
 
@@ -1202,9 +1305,16 @@ Gemini API:
       ).map(cb => cb.value);
 
       // フォームの入力値をオブジェクトにまとめる
+      // 生年月日: 3つのセレクトから "YYYY-MM-DD" 形式に合成
+      const birthdate = getBirthdateValue();
+      if (!birthdate) {
+        alert('生年月日の年・月・日をすべて選択してください。');
+        return;
+      }
+
       const data = {
         name         : document.getElementById('name').value,
-        birthdate    : document.getElementById('birthdate').value,
+        birthdate    : birthdate,
         gender       : document.getElementById('gender').value,
         height       : parseFloat(document.getElementById('height').value),
         weight       : parseFloat(document.getElementById('weight').value),
@@ -1439,6 +1549,9 @@ Gemini API:
      */
     window.onload = function() {
 
+      // ── 生年月日セレクトの年オプションを生成 ──
+      initBirthdateSelects();
+
       // ── APIキーの復元 ──
       // localStorage に保存済みのAPIキーがあれば読み込み、フォームとステータスに反映する
       const savedApiKey = localStorage.getItem('geminiApiKey');
@@ -1459,7 +1572,7 @@ Gemini API:
 
         // 初期設定フォームに保存済みの値を復元する
         if (basicInfo.name)        document.getElementById('name').value        = basicInfo.name;
-        if (basicInfo.birthdate)   document.getElementById('birthdate').value   = basicInfo.birthdate;
+        if (basicInfo.birthdate)   setBirthdateValue(basicInfo.birthdate);
         if (basicInfo.gender)      document.getElementById('gender').value      = basicInfo.gender;
         if (basicInfo.height)      document.getElementById('height').value      = basicInfo.height;
         if (basicInfo.weight)      document.getElementById('weight').value      = basicInfo.weight;
