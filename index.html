@@ -997,12 +997,20 @@ Gemini API:
       // レスポンスから生成テキストと終了理由を取り出す
       const data         = await response.json();
       const candidate    = data?.candidates?.[0];
-      const text         = candidate?.content?.parts?.[0]?.text;
+
+      // ▼ 修正ポイント: parts[0] だけでなく全 parts を結合する。
+      // Gemini は長い応答を複数の parts に分割して返すことがある。
+      // parts[0] のみ取得していると途中でテキストが切れ
+      // "Unterminated string" や "Unexpected end of JSON" の原因になる。
+      const parts        = candidate?.content?.parts || [];
+      const text         = parts.map(p => p.text ?? '').join('');
       const finishReason = candidate?.finishReason;
 
-      // デバッグ: 終了理由と受信テキスト冒頭をコンソールに出力
+      // デバッグ: 終了理由・parts数・テキスト冒頭をコンソールに出力
       console.log('Gemini finishReason:', finishReason);
-      console.log('Gemini text (先頭300字):', (text || '').slice(0, 300));
+      console.log('Gemini parts count:', parts.length);
+      console.log('Gemini text 全長:', text.length, '字');
+      console.log('Gemini text (先頭300字):', text.slice(0, 300));
 
       // STOP 以外の終了理由はすべて問題ありとして個別にエラーを出す
       const finishReasonMessages = {
