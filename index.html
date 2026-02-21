@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<!--
+========================================================
+睡眠コンシェルジュデモアプリ - スタンドアロン公開版
+========================================================
+
+概要:
+  Python バックエンド不要。HTML 1ファイルのみで動作。
+  ブラウザから Google Gemini API を直接呼び出して
+  パーソナライズされた睡眠アドバイスを生成するデモアプリ。
+  スマートフォン・PC どちらにも対応したレスポンシブデザイン。
+
+デプロイ方法 (外部公開 / 1週間以上の評価期間に対応):
+  ── 方法A: GitHub Pages（無料・永続・推奨）──
+  1. https://github.com でアカウント作成（無料）
+  2. 新しいリポジトリを作成（Public）
+  3. このHTMLファイルを「index.html」という名前でアップロード
+  4. Settings → Pages → Source: main branch → Save
+  5. URL: https://ユーザー名.github.io/リポジトリ名/
+
+  ── 方法B: Netlify（無料アカウントで永続） ──
+  1. https://app.netlify.com でアカウント作成（無料）
+  2. Sites → Add new site → Deploy manually
+  3. このHTMLファイルをドラッグ＆ドロップ
+  4. URL: https://ランダム文字列.netlify.app (永続)
+  ※ アカウントなしの Drop は1時間で消えるため要アカウント
+
+ローカル確認方法:
+  - このHTMLファイルをブラウザで直接開くだけ (Python サーバー不要)
+
+スマホ対応:
+  - iOS Safari / Android Chrome 両対応
+  - タッチ操作最適化済み
+  - フォントサイズ自動ズーム防止設定済み
+  - iPhone のノッチ・ホームバー対応 (Safe Area)
+
+データ保存:
+  - ユーザー基本情報はブラウザの localStorage に保存
+  - サーバーへの送信は行わない（デモ用途・プライバシー保護）
+
+Gemini API:
+  - ブラウザから REST API を直接呼び出す
+  - モデル: gemini-2.0-flash (高速・安定)
+========================================================
+-->
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <!-- スマホ対応: initial-scale=1 でスケールを固定。
+       user-scalable=no は iOS でフォームズームを防止するため設定。
+       viewport-fit=cover は iPhone のノッチ・Dynamic Island に対応する。 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+
+  <!-- iOS ホーム画面に追加した際にネイティブアプリ風で表示 -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="睡眠コンシェルジュ">
+
+  <!-- Android Chrome でホーム画面追加時のテーマカラー -->
+  <meta name="theme-color" content="#667eea">
+
+  <!-- SNS シェア時の OGP 設定 -->
+  <meta property="og:title" content="睡眠コンシェルジュ デモアプリ">
+  <meta property="og:description" content="AIがあなたの睡眠を科学的にサポートします">
+
+  <title>睡眠コンシェルジュ デモアプリ</title>
+
+  <!-- ============================================================
+       スタイルシート
+       紫系グラデーションをベースにしたモバイルフレンドリーなデザイン
+       ============================================================ -->
+  <style>
+    /* 全要素のマージン・パディングをリセット */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /* ページ全体: 紫系グラデーション背景
+       padding-bottom に env(safe-area-inset-bottom) を追加して
+       iPhone のホームバー領域に被らないよう対応する */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans',
+                   'Noto Sans JP', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      /* iPhone ノッチ対応: 上下の安全領域を確保 */
+      padding: max(20px, env(safe-area-inset-top))
+               20px
+               max(20px, env(safe-area-inset-bottom))
+               20px;
+      /* スマホでのスクロール慣性を有効化 */
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* メインコンテナ: 白い丸角カード (最大幅 600px)
+       スマホでは左右余白を詰めて画面を広く使う */
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 20px;
+      padding: 24px 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    /* スマホ小画面 (375px以下) ではパディングをさらに詰める */
+    @media (max-width: 375px) {
+      .container { padding: 18px 15px; border-radius: 16px; }
+    }
+
+    /* アプリロゴ・タイトル */
+    .logo { text-align: center; font-size: 3em; margin-bottom: 10px; }
+    h1 { text-align: center; color: #667eea; margin-bottom: 10px; font-size: 1.4em; }
+    .subtitle { text-align: center; color: #666; margin-bottom: 30px; font-size: 0.9em; }
+
+    /* タブ切り替えボタン
+       スマホで押しやすいよう min-height を確保 */
+    .tab-buttons { display: flex; gap: 8px; margin-bottom: 24px; }
+    .tab-btn {
+      flex: 1;
+      min-height: 50px;
+      padding: 12px 8px;
+      border: none;
+      background: #f0f0f0; color: #666;
+      border-radius: 12px; cursor: pointer;
+      font-size: 0.95em; font-weight: bold;
+      transition: all 0.3s;
+      -webkit-tap-highlight-color: transparent;
+      line-height: 1.3;
+    }
+    /* アクティブなタブ: グラデーション背景 */
+    .tab-btn.active {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      box-shadow: 0 4px 12px rgba(102,126,234,0.35);
+    }
+    .tab-btn:active:not(.active) { background: #e0e0e0; }
+
+    /* タブコンテンツ: 非アクティブは非表示、アクティブはフェードイン */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* フォーム各項目のラッパー */
+    .form-group { margin-bottom: 20px; }
+    label { display: block; margin-bottom: 8px; color: #333; font-weight: 500; font-size: 0.95em; }
+    .required { color: #e74c3c; }
+
+    /* テキスト・日付・数値・セレクトの共通スタイル
+       font-size: 16px を指定することで iOS Safari の
+       フォーカス時自動ズームを防止する（16px未満だとズームされる） */
+    input[type="text"], input[type="date"], input[type="number"],
+    input[type="time"], select {
+      width: 100%; padding: 13px 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 16px; /* iOS ズーム防止のため 16px 固定 */
+      color: #333; background: white;
+      transition: border-color 0.2s;
+      /* iOS でのデフォルト角丸を無効化 */
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    input:focus, select:focus {
+      outline: none; border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102,126,234,0.15);
+    }
+    /* セレクトボックスに矢印アイコンを追加 (iOS/Android 統一) */
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23667eea' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 36px;
+    }
+
+    /* チェックボックスグループ
+       スマホでタップしやすいよう min-height を確保し、
+       テキストも大きめに設定 */
+    .checkbox-group { display: flex; flex-direction: column; gap: 4px; }
+    .checkbox-item {
+      display: flex; align-items: center; gap: 12px;
+      cursor: pointer;
+      padding: 10px 8px;
+      border-radius: 8px;
+      min-height: 44px; /* タッチターゲット最小サイズ確保 */
+      transition: background 0.2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .checkbox-item:hover { background: #f5f5ff; }
+    .checkbox-item:active { background: #ebebff; }
+    .checkbox-item input[type="checkbox"] {
+      width: 22px; height: 22px;
+      cursor: pointer;
+      flex-shrink: 0; /* 縮まないよう固定 */
+      accent-color: #667eea; /* チェック色をブランドカラーに統一 */
+    }
+
+    /* スライダー (レンジ入力)
+       スマホでドラッグしやすいよう height を大きめに設定 */
+    .range-group { display: flex; align-items: center; gap: 12px; }
+    input[type="range"] {
+      flex: 1; cursor: pointer;
+      height: 6px; /* トラックの太さ */
+      accent-color: #667eea; /* スライダー色をブランドカラーに統一 */
+      -webkit-tap-highlight-color: transparent;
+    }
+    .range-value {
+      min-width: 32px; text-align: center;
+      font-weight: bold; color: #667eea; font-size: 1.2em;
+    }
+
+    /* ボタン共通スタイル
+       min-height: 52px でスマホのタッチターゲットを十分な大きさに確保
+       (Apple HIG / Google Material Design ともに最小 44〜48px 推奨) */
+    .btn {
+      width: 100%;
+      min-height: 52px;
+      padding: 14px 15px;
+      border: none;
+      border-radius: 12px;
+      font-size: 1.1em;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s;
+      letter-spacing: 0.02em;
+      /* タッチ操作でのハイライトを無効化 (iOS) */
+      -webkit-tap-highlight-color: transparent;
+    }
+    /* プライマリボタン: グラデーション */
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    /* PC: ホバー時に浮き上がるアニメーション */
+    @media (hover: hover) {
+      .btn-primary:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(102,126,234,0.4);
+      }
+    }
+    /* スマホ: タップ時の押し込みアニメーション */
+    .btn-primary:active:not(:disabled) {
+      transform: scale(0.97);
+      box-shadow: 0 2px 8px rgba(102,126,234,0.3);
+    }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* 情報ボックス・サクセスボックス・エラーボックス */
+    .info-box {
+      background: #e8f4f8; border-left: 4px solid #3498db;
+      padding: 15px; margin-bottom: 20px; border-radius: 5px;
+      line-height: 1.6;
+    }
+    .success-box {
+      background: #d4edda; border-left: 4px solid #28a745;
+      padding: 15px; margin-bottom: 20px; border-radius: 5px;
+      line-height: 1.6;
+    }
+    .error-box {
+      background: #fde8e8; border-left: 4px solid #e74c3c;
+      padding: 15px; margin-bottom: 20px; border-radius: 5px;
+      line-height: 1.6;
+    }
+
+    /* ローディングスピナー (AI生成中に表示) */
+    .loading { text-align: center; padding: 40px; }
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%; width: 50px; height: 50px;
+      animation: spin 1s linear infinite; margin: 0 auto 20px;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .loading p { color: #666; line-height: 1.8; }
+
+    /* アドバイス表示エリア */
+    .advice-container { margin-top: 30px; }
+    .advice-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white; padding: 25px 20px;
+      border-radius: 10px 10px 0 0; text-align: center;
+    }
+    .advice-header h2 { font-size: 1.2em; line-height: 1.5; }
+    .advice-body {
+      background: #f8f9ff; padding: 20px;
+      border-radius: 0 0 10px 10px;
+    }
+
+    /* 推奨就寝時刻 (大きく強調表示) */
+    .bedtime {
+      text-align: center; font-size: 2.8em;
+      color: #667eea; margin: 20px 0;
+      font-weight: bold; letter-spacing: 0.05em;
+    }
+
+    /* 今夜のスケジュール行 */
+    .schedule-item {
+      display: flex; align-items: flex-start; gap: 15px;
+      padding: 12px 15px; background: white;
+      border-radius: 10px; margin-bottom: 8px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .schedule-time {
+      font-size: 1.1em; font-weight: bold;
+      color: #667eea; min-width: 60px; padding-top: 1px;
+    }
+    .schedule-action { color: #333; line-height: 1.5; }
+
+    /* アドバイスカード */
+    .advice-card {
+      background: white; border-radius: 10px;
+      padding: 18px 20px; margin-bottom: 12px;
+      border-left: 5px solid #667eea;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .advice-card h3 {
+      color: #667eea; margin-bottom: 10px;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 1em; flex-wrap: wrap;
+    }
+    .priority-badge {
+      background: #667eea; color: white;
+      padding: 3px 10px; border-radius: 20px;
+      font-size: 0.75em; font-weight: normal;
+    }
+    .advice-action { font-weight: bold; color: #333; line-height: 1.5; }
+    .advice-reason { margin-top: 8px; color: #666; font-size: 0.9em; line-height: 1.5; }
+
+    /* 睡眠品質スコア */
+    .prediction {
+      text-align: center; padding: 20px;
+      background: white; border-radius: 10px;
+      margin-top: 15px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .prediction-score {
+      font-size: 3.5em; font-weight: bold;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .prediction-label { color: #999; font-size: 0.85em; margin-bottom: 5px; }
+    .prediction-comment { color: #555; margin-top: 8px; line-height: 1.5; }
+
+    /* 励ましメッセージ */
+    .encouragement {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white; padding: 20px;
+      border-radius: 10px; margin-top: 15px;
+      text-align: center; line-height: 1.8;
+      font-size: 1.05em;
+    }
+
+    /* セクション見出し */
+    .section-title {
+      color: #444; font-size: 1em; font-weight: bold;
+      margin: 20px 0 12px; display: flex; align-items: center; gap: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- アプリのロゴとタイトル -->
+    <div class="logo">🌙</div>
+    <h1>睡眠コンシェルジュ<br>デモアプリ</h1>
+    <p class="subtitle" id="subtitle">あなたの睡眠を科学的にサポート</p>
+
+    <!-- タブ切り替えボタン (初期設定 / 今日の記録) -->
+    <div class="tab-buttons">
+      <button class="tab-btn active" onclick="switchTab('setup')">⚙️ 初期設定</button>
+      <button class="tab-btn" onclick="switchTab('daily')">📝 今日の記録</button>
+    </div>
+
+    <!-- ============================================================
+         「初期設定」タブ
+         名前・生年月日・性別・身長・体重・職業・起床時刻・睡眠の悩みを入力。
+         入力内容はブラウザの localStorage に保存される（サーバー送信なし）。
+         ============================================================ -->
+    <div id="setup-tab" class="tab-content active">
+
+      <div class="info-box" id="setup-info-box">
+        💡 初回のみ基本情報を入力してください。<br>
+        入力データはこのブラウザ内にのみ保存されます。
+      </div>
+
+      <form id="basic-form">
+
+        <!-- 名前 -->
+        <div class="form-group">
+          <label for="name">お名前<span class="required">*</span></label>
+          <input type="text" id="name" required placeholder="山田太郎">
+        </div>
+
+        <!-- 生年月日 (年齢計算でアドバイスの精度を上げる) -->
+        <div class="form-group">
+          <label for="birthdate">生年月日<span class="required">*</span></label>
+          <input type="date" id="birthdate" required>
+        </div>
+
+        <!-- 性別 -->
+        <div class="form-group">
+          <label for="gender">性別<span class="required">*</span></label>
+          <select id="gender" required>
+            <option value="">選択してください</option>
+            <option value="男性">男性</option>
+            <option value="女性">女性</option>
+            <option value="その他">その他</option>
+          </select>
+        </div>
+
+        <!-- 身長 (BMI算出などに活用) -->
+        <div class="form-group">
+          <label for="height">身長（cm）<span class="required">*</span></label>
+          <input type="number" id="height" required min="100" max="250" placeholder="170">
+        </div>
+
+        <!-- 体重 -->
+        <div class="form-group">
+          <label for="weight">体重（kg）<span class="required">*</span></label>
+          <input type="number" id="weight" required min="30" max="200" step="0.1" placeholder="60.5">
+        </div>
+
+        <!-- 職業・学年 (生活リズムの推定に使用) -->
+        <div class="form-group">
+          <label for="occupation">職業 / 学年<span class="required">*</span></label>
+          <select id="occupation" required>
+            <option value="">選択してください</option>
+            <option value="大学生（1-2年）">大学生（1-2年）</option>
+            <option value="大学生（3-4年）">大学生（3-4年）</option>
+            <option value="大学院生">大学院生</option>
+            <option value="会社員">会社員</option>
+            <option value="研究者・教員">研究者・教員</option>
+            <option value="その他">その他</option>
+          </select>
+        </div>
+
+        <!-- 普段の起床時刻 (サーカディアンリズムの基準) -->
+        <div class="form-group">
+          <label for="avgWakeTime">普段の起床時刻<span class="required">*</span></label>
+          <input type="time" id="avgWakeTime" required value="07:00">
+        </div>
+
+        <!-- 睡眠の悩み (複数選択可) -->
+        <div class="form-group">
+          <label>睡眠の悩み（複数選択可）</label>
+          <div class="checkbox-group">
+            <label class="checkbox-item">
+              <input type="checkbox" name="concerns" value="寝付きが悪い">寝付きが悪い
+            </label>
+            <label class="checkbox-item">
+              <input type="checkbox" name="concerns" value="夜中に目が覚める">夜中に目が覚める
+            </label>
+            <label class="checkbox-item">
+              <input type="checkbox" name="concerns" value="熟睡感がない">熟睡感がない
+            </label>
+            <label class="checkbox-item">
+              <input type="checkbox" name="concerns" value="朝起きられない">朝起きられない
+            </label>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="save-basic-btn">
+          💾 保存してスタート
+        </button>
+      </form>
+    </div>
+
+    <!-- ============================================================
+         「今日の記録」タブ
+         今日の生活行動（起床・食事・運動・ストレスなど）を入力し、
+         「AIアドバイスを生成」ボタンで Gemini API を呼び出す。
+         ============================================================ -->
+    <div id="daily-tab" class="tab-content">
+
+      <div class="info-box">
+        📝 今日の活動を振り返って入力してください。<br>
+        AI が今夜の最適な睡眠プランを提案します。
+      </div>
+
+      <form id="daily-form">
+
+        <!-- 今日の起床時刻 -->
+        <div class="form-group">
+          <label for="wakeTime">今日の起床時刻<span class="required">*</span></label>
+          <input type="time" id="wakeTime" required>
+        </div>
+
+        <!-- 朝食 (食べた場合は時刻フィールドを追加表示) -->
+        <div class="form-group">
+          <label for="breakfast">朝食<span class="required">*</span></label>
+          <select id="breakfast" required onchange="toggleBreakfastTime()">
+            <option value="食べた">食べた</option>
+            <option value="軽く食べた">軽く食べた</option>
+            <option value="食べなかった">食べなかった</option>
+          </select>
+        </div>
+
+        <!-- 朝食時刻 (朝食を食べた場合のみ表示) -->
+        <div class="form-group" id="breakfast-time-group">
+          <label for="breakfastTime">朝食時刻</label>
+          <input type="time" id="breakfastTime">
+        </div>
+
+        <!-- 日中の運動量 -->
+        <div class="form-group">
+          <label for="exercise">日中の運動<span class="required">*</span></label>
+          <select id="exercise" required>
+            <option value="ほとんど動かなかった">ほとんど動かなかった</option>
+            <option value="通勤・通学程度">通勤・通学程度</option>
+            <option value="軽い運動（20〜30分）">軽い運動（20〜30分）</option>
+            <option value="しっかり運動（30分以上）">しっかり運動（30分以上）</option>
+          </select>
+        </div>
+
+        <!-- カフェイン摂取 (摂取した場合は最終時刻を追加表示) -->
+        <div class="form-group">
+          <label for="caffeine">カフェイン<span class="required">*</span></label>
+          <select id="caffeine" required onchange="toggleCaffeineTime()">
+            <option value="摂取していない">摂取していない</option>
+            <option value="午前中のみ">午前中のみ</option>
+            <option value="15時前まで">15時前まで</option>
+            <option value="15時以降も">15時以降も</option>
+          </select>
+        </div>
+
+        <!-- 最終カフェイン摂取時刻 (摂取した場合のみ表示) -->
+        <div class="form-group" id="caffeine-time-group" style="display:none;">
+          <label for="caffeineTime">最終カフェイン時刻</label>
+          <input type="time" id="caffeineTime">
+        </div>
+
+        <!-- 昼寝の有無 (した場合は時間フィールドを追加表示) -->
+        <div class="form-group">
+          <label for="nap">昼寝<span class="required">*</span></label>
+          <select id="nap" required onchange="toggleNapDuration()">
+            <option value="していない">していない</option>
+            <option value="した（30分未満）">した（30分未満）</option>
+            <option value="した（30分以上）">した（30分以上）</option>
+          </select>
+        </div>
+
+        <!-- 昼寝時間 (昼寝した場合のみ表示) -->
+        <div class="form-group" id="nap-duration-group" style="display:none;">
+          <label for="napDuration">昼寝時間（分）</label>
+          <input type="number" id="napDuration" min="0" max="180" placeholder="20">
+        </div>
+
+        <!-- 夕食時刻 (就寝時刻との間隔計算に使用) -->
+        <div class="form-group">
+          <label for="dinnerTime">夕食時刻<span class="required">*</span></label>
+          <input type="time" id="dinnerTime" required>
+        </div>
+
+        <!-- 夕食内容 (消化時間の推定に使用) -->
+        <div class="form-group">
+          <label for="dinnerContent">夕食の内容<span class="required">*</span></label>
+          <select id="dinnerContent" required>
+            <option value="軽め">軽め</option>
+            <option value="普通">普通</option>
+            <option value="やや多め">やや多め</option>
+            <option value="油っこい・肉中心">油っこい・肉中心</option>
+          </select>
+        </div>
+
+        <!-- 夕方以降の運動 (体温・覚醒度への影響を考慮) -->
+        <div class="form-group">
+          <label for="eveningExercise">夕方以降の運動<span class="required">*</span></label>
+          <select id="eveningExercise" required>
+            <option value="していない">していない</option>
+            <option value="軽いストレッチ">軽いストレッチ</option>
+            <option value="散歩">散歩</option>
+            <option value="ジョギング・筋トレ">ジョギング・筋トレ</option>
+          </select>
+        </div>
+
+        <!-- ストレスレベル: 1〜5のスライダー -->
+        <div class="form-group">
+          <label>ストレスレベル<span class="required">*</span></label>
+          <div class="range-group">
+            <span style="color:#666;font-size:0.85em;">低</span>
+            <input type="range" id="stress" min="1" max="5" value="3"
+                   oninput="updateRange('stress')">
+            <span style="color:#666;font-size:0.85em;">高</span>
+            <span class="range-value" id="stress-value">3</span>
+          </div>
+        </div>
+
+        <!-- 疲労感: 1〜5のスライダー -->
+        <div class="form-group">
+          <label>疲労感<span class="required">*</span></label>
+          <div class="range-group">
+            <span style="color:#666;font-size:0.85em;">元気</span>
+            <input type="range" id="fatigue" min="1" max="5" value="3"
+                   oninput="updateRange('fatigue')">
+            <span style="color:#666;font-size:0.85em;">疲れた</span>
+            <span class="range-value" id="fatigue-value">3</span>
+          </div>
+        </div>
+
+        <!-- AIアドバイス生成ボタン -->
+        <button type="submit" class="btn btn-primary" id="generate-btn">
+          💡 AIアドバイスを生成
+        </button>
+      </form>
+
+      <!-- AIアドバイスの表示エリア (フォーム送信後に動的に生成) -->
+      <div id="advice-display" style="display:none;"></div>
+
+    </div><!-- /#daily-tab -->
+
+  </div><!-- /.container -->
+
+  <!-- ============================================================
+       JavaScript: アプリの全動作ロジック
+       ============================================================ -->
+  <script>
+    // ============================================================
+    // Gemini API 設定
+    // ブラウザから直接 Gemini REST API を呼び出す。
+    // Python バックエンドは不要。
+    // ============================================================
+
+    /** Gemini API キー (Google AI Studio で取得) */
+    const GEMINI_API_KEY = 'AIzaSyCrxT3Z6hgyvO1YDIZs53RurWBiu_uiblQ';
+
+    /**
+     * 使用するモデル名。
+     * gemini-2.0-flash: 高速・高品質・安定版
+     */
+    const GEMINI_MODEL = 'gemini-2.0-flash';
+
+    /**
+     * Gemini API の REST エンドポイント URL。
+     * generateContent メソッドでテキスト生成を行う。
+     */
+    const GEMINI_API_URL =
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+
+
+    // ============================================================
+    // タブ切り替え処理
+    // ============================================================
+
+    /**
+     * タブを切り替える。
+     * 全タブボタン・コンテンツから 'active' を除去し、指定タブに付与する。
+     *
+     * @param {string} tab - 切り替え先 ('setup' または 'daily')
+     */
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+      if (tab === 'setup') {
+        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+        document.getElementById('setup-tab').classList.add('active');
+      } else {
+        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+        document.getElementById('daily-tab').classList.add('active');
+        // 基本情報未登録の場合は初期設定タブへ戻す
+        if (!checkBasicInfo()) return;
+      }
+    }
+
+
+    // ============================================================
+    // 条件付きフィールドの表示/非表示切り替え
+    // ============================================================
+
+    /**
+     * 朝食選択に応じて朝食時刻フィールドを表示/非表示にする。
+     * 「食べなかった」選択時は非表示にして値もリセットする。
+     */
+    function toggleBreakfastTime() {
+      const hide = document.getElementById('breakfast').value === '食べなかった';
+      document.getElementById('breakfast-time-group').style.display = hide ? 'none' : 'block';
+      if (hide) document.getElementById('breakfastTime').value = '';
+    }
+
+    /**
+     * カフェイン選択に応じて最終摂取時刻フィールドを表示/非表示にする。
+     * 「摂取していない」選択時は非表示にして値もリセットする。
+     */
+    function toggleCaffeineTime() {
+      const hide = document.getElementById('caffeine').value === '摂取していない';
+      document.getElementById('caffeine-time-group').style.display = hide ? 'none' : 'block';
+      if (hide) document.getElementById('caffeineTime').value = '';
+    }
+
+    /**
+     * 昼寝選択に応じて昼寝時間フィールドを表示/非表示にする。
+     * 「していない」選択時は非表示にして値もリセットする。
+     */
+    function toggleNapDuration() {
+      const hide = document.getElementById('nap').value === 'していない';
+      document.getElementById('nap-duration-group').style.display = hide ? 'none' : 'block';
+      if (hide) document.getElementById('napDuration').value = '';
+    }
+
+    /**
+     * スライダーの値をリアルタイムで隣の数値表示に反映する。
+     *
+     * @param {string} id - スライダー要素の id ('stress' または 'fatigue')
+     */
+    function updateRange(id) {
+      document.getElementById(id + '-value').textContent =
+        document.getElementById(id).value;
+    }
+
+
+    // ============================================================
+    // 基本情報チェック
+    // ============================================================
+
+    /**
+     * localStorage に基本情報が保存されているか確認する。
+     * 未登録なら警告を出して初期設定タブへ移動する。
+     *
+     * @returns {boolean} 基本情報が存在すれば true
+     */
+    function checkBasicInfo() {
+      if (!localStorage.getItem('sleepAppBasicInfo')) {
+        alert('先に「初期設定」タブで基本情報を入力してください');
+        switchTab('setup');
+        return false;
+      }
+      return true;
+    }
+
+
+    // ============================================================
+    // Gemini API への呼び出し
+    // ============================================================
+
+    /**
+     * Gemini REST API を呼び出してテキストを生成する。
+     * バックエンドサーバーは不要。ブラウザから直接呼び出す。
+     *
+     * @param {string} prompt - Gemini に送るプロンプト文字列
+     * @returns {Promise<string>} Gemini が返したテキスト
+     * @throws {Error} APIエラー・ネットワークエラー時
+     */
+    async function callGeminiAPI(prompt) {
+      // Gemini REST API に POST リクエストを送る
+      // リクエストボディは { contents: [{ parts: [{ text: prompt }] }] } 形式
+      const response = await fetch(GEMINI_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          // 生成設定: JSON形式の出力を安定させるためのパラメータ
+          generationConfig: {
+            temperature: 0.7,      // 創造性と安定性のバランス
+            maxOutputTokens: 2048, // 最大出力トークン数
+          }
+        }),
+      });
+
+      // HTTP エラー (4xx, 5xx) を検出してエラーをスロー
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        const errMsg = errBody?.error?.message || `HTTP ${response.status}`;
+        throw new Error(`Gemini API エラー: ${errMsg}`);
+      }
+
+      // レスポンスから生成テキストを取り出す
+      const data = await response.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!text) {
+        throw new Error('Gemini API から有効なテキストが返されませんでした');
+      }
+
+      return text;
+    }
+
+
+    // ============================================================
+    // Gemini API 用プロンプトの生成
+    // ============================================================
+
+    /**
+     * ユーザーの基本情報と今日の活動データから
+     * Gemini に送るプロンプト文字列を組み立てる。
+     * JSON 形式のアドバイスを返すよう指示する。
+     *
+     * @param {Object} basicInfo - 基本情報オブジェクト
+     * @param {Object} dailyData - 今日の活動データオブジェクト
+     * @returns {string} プロンプト文字列
+     */
+    function buildGeminiPrompt(basicInfo, dailyData) {
+      // ── 年齢を生年月日から計算 ──
+      let ageStr = '不明';
+      if (basicInfo.birthdate) {
+        const birth = new Date(basicInfo.birthdate);
+        const today = new Date();
+        let age = today.getFullYear() - birth.getFullYear();
+        // 今年の誕生日がまだなら -1 して正確な満年齢を算出
+        const hasNotBirthdayYet =
+          today.getMonth() < birth.getMonth() ||
+          (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate());
+        if (hasNotBirthdayYet) age--;
+        ageStr = `${age}`;
+      }
+
+      // ── 睡眠の悩みをカンマ区切りのテキストに変換 ──
+      const concerns = (basicInfo.sleepConcerns || []).join('、') || '特になし';
+
+      // ── プロンプト本文を構築 ──
+      return `
+あなたは睡眠科学に基づいた専門コンシェルジュです。
+以下のユーザー情報と今日の活動データを分析し、パーソナライズされた睡眠アドバイスを
+**必ず下記の JSON 形式のみ** で返してください（マークダウンのコードブロック不要）。
+
+## ユーザー基本情報
+- 名前     : ${basicInfo.name || ''}さん
+- 年齢     : ${ageStr}歳
+- 性別     : ${basicInfo.gender || '不明'}
+- 身長/体重: ${basicInfo.height || ''}cm / ${basicInfo.weight || ''}kg
+- 職業     : ${basicInfo.occupation || '不明'}
+- 普段の起床時刻: ${basicInfo.avgWakeTime || '不明'}
+- 睡眠の悩み    : ${concerns}
+
+## 今日の活動データ
+- 起床時刻       : ${dailyData.wakeTime || '不明'}
+- 朝食           : ${dailyData.breakfast || '不明'}（時刻: ${dailyData.breakfastTime || '不明'}）
+- 日中の運動     : ${dailyData.exercise || '不明'}
+- カフェイン摂取 : ${dailyData.caffeine || '不明'}（最終: ${dailyData.caffeineTime || '不明'}）
+- 昼寝           : ${dailyData.nap || '不明'}（時間: ${dailyData.napDuration || 0}分）
+- 夕食時刻       : ${dailyData.dinnerTime || '不明'}
+- 夕食内容       : ${dailyData.dinnerContent || '不明'}
+- 夕方以降の運動 : ${dailyData.eveningExercise || '不明'}
+- ストレスレベル : ${dailyData.stress || 3}/5
+- 疲労感         : ${dailyData.fatigue || 3}/5
+
+## 返答形式 (このJSONのみ返すこと)
+{
+  "greeting": "ユーザー名を含む親しみやすい挨拶文",
+  "today_summary": "今日の活動の要約コメント（50文字以内）",
+  "recommended_bedtime": "推奨就寝時刻（例: 23:00）",
+  "sleep_schedule": [
+    {"time": "時刻（例: 21:00）", "action": "この時刻にすべき行動"},
+    {"time": "時刻", "action": "行動"},
+    {"time": "時刻", "action": "行動"},
+    {"time": "就寝時刻", "action": "就寝"}
+  ],
+  "priority_advice": [
+    {
+      "priority": 1,
+      "icon": "関連する絵文字",
+      "title": "アドバイスのタイトル",
+      "action": "具体的な行動指示",
+      "reason": "科学的な理由（50文字以内）"
+    },
+    {"priority": 2, "icon": "絵文字", "title": "タイトル", "action": "行動指示", "reason": "理由"},
+    {"priority": 3, "icon": "絵文字", "title": "タイトル", "action": "行動指示", "reason": "理由"}
+  ],
+  "sleep_prediction": {
+    "quality_score": 予測睡眠スコア（0〜100の整数）,
+    "comment": "睡眠品質の予測コメント（40文字以内）"
+  },
+  "encouragement": "温かい励ましのメッセージ（30文字以内）"
+}
+
+ユーザーに寄り添った、温かく実践的なアドバイスを日本語で生成してください。
+`;
+    }
+
+
+    // ============================================================
+    // 初期設定フォームの送信処理
+    // ============================================================
+
+    document.getElementById('basic-form').addEventListener('submit', function(e) {
+      e.preventDefault(); // ページリロードを防ぐ
+
+      // チェックボックスで選択された睡眠の悩みを配列として収集
+      const concerns = Array.from(
+        document.querySelectorAll('input[name="concerns"]:checked')
+      ).map(cb => cb.value);
+
+      // フォームの入力値をオブジェクトにまとめる
+      const data = {
+        name         : document.getElementById('name').value,
+        birthdate    : document.getElementById('birthdate').value,
+        gender       : document.getElementById('gender').value,
+        height       : parseFloat(document.getElementById('height').value),
+        weight       : parseFloat(document.getElementById('weight').value),
+        occupation   : document.getElementById('occupation').value,
+        avgWakeTime  : document.getElementById('avgWakeTime').value,
+        sleepConcerns: concerns,
+      };
+
+      // ブラウザの localStorage に保存する（サーバー送信は行わない）
+      localStorage.setItem('sleepAppBasicInfo', JSON.stringify(data));
+
+      // 成功メッセージを表示し、1.5秒後に「今日の記録」タブへ移動
+      const infoBox = document.getElementById('setup-info-box');
+      infoBox.className = 'success-box';
+      infoBox.textContent = `✅ ${data.name}さんの情報を保存しました！今日の記録タブへ移動します。`;
+
+      setTimeout(() => switchTab('daily'), 1500);
+    });
+
+
+    // ============================================================
+    // 今日の記録フォームの送信処理 (AIアドバイス生成)
+    // ============================================================
+
+    document.getElementById('daily-form').addEventListener('submit', async function(e) {
+      e.preventDefault(); // ページリロードを防ぐ
+
+      // localStorage から基本情報を取得 (未登録なら中断)
+      const basicInfo = JSON.parse(localStorage.getItem('sleepAppBasicInfo'));
+      if (!basicInfo) {
+        alert('先に基本情報を入力してください');
+        switchTab('setup');
+        return;
+      }
+
+      // 今日の活動データをフォームから収集
+      const dailyData = {
+        wakeTime       : document.getElementById('wakeTime').value,
+        breakfast      : document.getElementById('breakfast').value,
+        breakfastTime  : document.getElementById('breakfastTime').value,
+        exercise       : document.getElementById('exercise').value,
+        caffeine       : document.getElementById('caffeine').value,
+        caffeineTime   : document.getElementById('caffeineTime').value,
+        nap            : document.getElementById('nap').value,
+        napDuration    : parseInt(document.getElementById('napDuration').value) || 0,
+        dinnerTime     : document.getElementById('dinnerTime').value,
+        dinnerContent  : document.getElementById('dinnerContent').value,
+        eveningExercise: document.getElementById('eveningExercise').value,
+        stress         : parseInt(document.getElementById('stress').value),
+        fatigue        : parseInt(document.getElementById('fatigue').value),
+      };
+
+      // ボタンを無効化してローディング表示を開始
+      const btn = document.getElementById('generate-btn');
+      btn.disabled = true;
+      btn.textContent = '生成中...';
+
+      const display = document.getElementById('advice-display');
+      display.style.display = 'block';
+      display.innerHTML = `
+        <div class="loading">
+          <div class="spinner"></div>
+          <p>🤖 AI が睡眠アドバイスを<br>生成しています...<br>
+          <small style="color:#999;">（10〜20秒かかる場合があります）</small></p>
+        </div>`;
+
+      // アドバイス生成エリアまでスクロール
+      display.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      try {
+        // ── Gemini API 呼び出し ──
+        // プロンプトを構築して Gemini に送信する
+        const prompt = buildGeminiPrompt(basicInfo, dailyData);
+        const rawText = await callGeminiAPI(prompt);
+
+        // ── JSON 解析 ──
+        // Gemini がコードブロック (```json ... ```) で囲む場合があるため除去
+        let jsonText = rawText.trim();
+        jsonText = jsonText.replace(/^```(?:json)?\s*\n?/i, '');
+        jsonText = jsonText.replace(/\n?```\s*$/i, '');
+
+        // JSON 文字列を JavaScript オブジェクトに変換
+        const advice = JSON.parse(jsonText);
+
+        // パースに成功したらアドバイスを画面に表示
+        displayAdvice(advice);
+
+      } catch (err) {
+        // エラー発生時: エラー内容を画面に表示
+        display.innerHTML = `
+          <div class="error-box">
+            ❌ アドバイスの生成中にエラーが発生しました。<br>
+            <strong>${err.message}</strong><br><br>
+            <small>しばらく待ってから再度お試しください。</small>
+          </div>`;
+        console.error('Gemini API エラー:', err);
+
+      } finally {
+        // 処理完了後、必ずボタンを元に戻す
+        btn.disabled = false;
+        btn.textContent = '💡 AIアドバイスを生成';
+      }
+    });
+
+
+    // ============================================================
+    // アドバイス表示処理
+    // ============================================================
+
+    /**
+     * Gemini が返したアドバイスオブジェクトを HTML に変換して表示する。
+     *
+     * アドバイスオブジェクトの構造:
+     *   greeting          : 挨拶文
+     *   today_summary     : 今日の要約
+     *   recommended_bedtime: 推奨就寝時刻
+     *   sleep_schedule    : スケジュール配列 [{time, action}]
+     *   priority_advice   : 優先アドバイス配列 [{priority, icon, title, action, reason}]
+     *   sleep_prediction  : 睡眠予測 {quality_score, comment}
+     *   encouragement     : 励ましメッセージ
+     *
+     * @param {Object} advice - Gemini が生成したアドバイスオブジェクト
+     */
+    function displayAdvice(advice) {
+      // ── スケジュール HTML を生成 ──
+      const scheduleHTML = (advice.sleep_schedule || []).map(s => `
+        <div class="schedule-item">
+          <div class="schedule-time">${s.time}</div>
+          <div class="schedule-action">${s.action}</div>
+        </div>`
+      ).join('');
+
+      // ── 優先アドバイスカード HTML を生成 ──
+      const adviceHTML = (advice.priority_advice || []).map(adv => `
+        <div class="advice-card">
+          <h3>
+            <span>${adv.icon || ''}</span>
+            <span>${adv.title}</span>
+            <span class="priority-badge">優先度 ${adv.priority}</span>
+          </h3>
+          <p class="advice-action">✅ ${adv.action}</p>
+          <p class="advice-reason">${adv.reason}</p>
+        </div>`
+      ).join('');
+
+      // ── 睡眠品質スコア HTML を生成 ──
+      const predictionHTML = advice.sleep_prediction
+        ? `<div class="prediction">
+             <p class="prediction-label">今夜の予測睡眠品質スコア</p>
+             <div class="prediction-score">${advice.sleep_prediction.quality_score}点</div>
+             <p class="prediction-comment">${advice.sleep_prediction.comment}</p>
+           </div>`
+        : '';
+
+      // ── 全体を advice-display 要素に挿入 ──
+      document.getElementById('advice-display').innerHTML = `
+        <div class="advice-container">
+          <!-- ヘッダー: 挨拶と今日のサマリー -->
+          <div class="advice-header">
+            <h2>${advice.greeting}</h2>
+            <p style="margin-top:10px;opacity:0.9;">${advice.today_summary}</p>
+          </div>
+
+          <div class="advice-body">
+            <!-- 推奨就寝時刻 -->
+            <div class="bedtime">⏰ ${advice.recommended_bedtime}</div>
+
+            <!-- 今夜のスケジュール -->
+            <p class="section-title">📅 今夜のスケジュール</p>
+            ${scheduleHTML}
+
+            <!-- 優先アクション -->
+            <p class="section-title" style="margin-top:25px;">💡 優先アクション</p>
+            ${adviceHTML}
+
+            <!-- 睡眠品質スコア -->
+            ${predictionHTML}
+
+            <!-- 励ましメッセージ -->
+            <div class="encouragement">${advice.encouragement}</div>
+          </div>
+        </div>`;
+
+      // アドバイス全体が見えるようにスクロール
+      document.getElementById('advice-display').scrollIntoView({ behavior: 'smooth' });
+    }
+
+
+    // ============================================================
+    // ページ読み込み時の初期処理
+    // ============================================================
+
+    /**
+     * ページ読み込み時に localStorage から基本情報を読み込み、
+     * 登録済みの場合はフォームに値を復元してサブタイトルを変更する。
+     */
+    window.onload = function() {
+      const basicInfo = JSON.parse(localStorage.getItem('sleepAppBasicInfo') || 'null');
+
+      if (basicInfo) {
+        // サブタイトルをユーザー名専用に変更
+        document.getElementById('subtitle').textContent =
+          `${basicInfo.name}さん専用の睡眠アドバイス`;
+
+        // 初期設定フォームに保存済みの値を復元する
+        if (basicInfo.name)        document.getElementById('name').value        = basicInfo.name;
+        if (basicInfo.birthdate)   document.getElementById('birthdate').value   = basicInfo.birthdate;
+        if (basicInfo.gender)      document.getElementById('gender').value      = basicInfo.gender;
+        if (basicInfo.height)      document.getElementById('height').value      = basicInfo.height;
+        if (basicInfo.weight)      document.getElementById('weight').value      = basicInfo.weight;
+        if (basicInfo.occupation)  document.getElementById('occupation').value  = basicInfo.occupation;
+        if (basicInfo.avgWakeTime) document.getElementById('avgWakeTime').value = basicInfo.avgWakeTime;
+
+        // 睡眠の悩みチェックボックスを復元
+        (basicInfo.sleepConcerns || []).forEach(concern => {
+          const cb = document.querySelector(
+            `input[name="concerns"][value="${concern}"]`
+          );
+          if (cb) cb.checked = true;
+        });
+
+        // 情報ボックスを「登録済み」案内に変更
+        const infoBox = document.getElementById('setup-info-box');
+        infoBox.className = 'success-box';
+        infoBox.textContent =
+          `✅ ${basicInfo.name}さんの情報が登録されています。変更する場合は再入力して保存してください。`;
+      }
+    };
+  </script>
+</body>
+</html>
