@@ -734,6 +734,62 @@ Gemini API:
 
 
     // ============================================================
+    // JSONサニタイザ
+    // ============================================================
+
+    /**
+     * Gemini が JSON 文字列値の中に生の制御文字（改行・復帰・タブ）を
+     * エスケープせずに出力する場合がある。それを JSON.parse が拒否するため、
+     * 1文字ずつ走査して「JSON文字列内部にある制御文字だけ」を
+     * 正しいエスケープ表現（\\n / \\r / \\t）に変換する。
+     *
+     * @param {string} text - Gemini から受け取った生の JSON テキスト
+     * @returns {string}    - 制御文字をエスケープした JSON テキスト
+     */
+    function sanitizeJsonControlChars(text) {
+      let result   = '';
+      let inString = false; // 現在 JSON 文字列の内側にいるか
+      let escaped  = false; // 直前の文字が \ だったか
+
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+
+        if (escaped) {
+          // 直前が \ なのでこの文字はエスケープ済み → そのまま出力
+          result  += c;
+          escaped  = false;
+          continue;
+        }
+
+        if (c === '\\' && inString) {
+          // エスケープシーケンスの開始
+          escaped = true;
+          result += c;
+          continue;
+        }
+
+        if (c === '"') {
+          // 文字列の開始 / 終了を切り替え
+          inString = !inString;
+          result += c;
+          continue;
+        }
+
+        if (inString) {
+          // 文字列内の生の制御文字をエスケープ
+          if (c === '\n') { result += '\\n'; continue; }
+          if (c === '\r') { result += '\\r'; continue; }
+          if (c === '\t') { result += '\\t'; continue; }
+        }
+
+        result += c;
+      }
+
+      return result;
+    }
+
+
+    // ============================================================
     // Gemini APIキー管理
     // ============================================================
 
@@ -936,11 +992,24 @@ Gemini API:
         throw new Error(`Gemini API エラー: ${errMsg}`);
       }
 
-      // レスポンスから生成テキストを取り出す
+      // レスポンスから生成テキストと終了理由を取り出す
       const data = await response.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const candidate   = data?.candidates?.[0];
+      const text        = candidate?.content?.parts?.[0]?.text;
+      const finishReason = candidate?.finishReason;
+
+      // MAX_TOKENS: トークン上限で打ち切られた → JSONが不完全になる主因のひとつ
+      if (finishReason === 'MAX_TOKENS') {
+        console.warn('Gemini: MAX_TOKENS で応答が打ち切られました。生レスポンス:', data);
+        throw new Error(
+          'AIの応答がトークン上限で途中終了しました。\n\n' +
+          'もう一度「AIアドバイスを生成」を押してください。\n' +
+          '（繰り返す場合は入力内容を短くすると改善する場合があります）'
+        );
+      }
 
       if (!text) {
+        console.warn('Gemini: テキストが取得できません。レスポンス:', data);
         throw new Error('Gemini API から有効なテキストが返されませんでした');
       }
 
@@ -1140,6 +1209,13 @@ Gemini API:
         // 先頭の { または [ 以前の余分なテキストがあれば除去
         const jsonStart = jsonText.search(/[{[]/);
         if (jsonStart > 0) jsonText = jsonText.slice(jsonStart);
+
+        // ── JSONサニタイズ ──
+        // Gemini が JSON 文字列内に生の改行(\n)・復帰(\r)・タブ(\t)を
+        // エスケープなしで埋め込むと "Unterminated string" エラーになる。
+        // 1文字ずつ走査してJSON文字列の内外を判定し、
+        // 文字列内の制御文字だけを安全にエスケープする。
+        jsonText = sanitizeJsonControlChars(jsonText);
 
         // JSON 文字列を JavaScript オブジェクトに変換（失敗時は生テキストをコンソール出力）
         let advice;
